@@ -1,3 +1,4 @@
+
 pipeline {
     agent any
 
@@ -38,11 +39,6 @@ pipeline {
 
                         $venvPython = Join-Path (Get-Location) ".venv\\Scripts\\python.exe"
 
-                        & $venvPython -m pip install --upgrade pip
-                        if ($LASTEXITCODE -ne 0) {
-                            throw "pip upgrade failed"
-                        }
-
                         & $venvPython -m pip install -r requirements.txt
                         if ($LASTEXITCODE -ne 0) {
                             throw "Dependency installation failed"
@@ -72,29 +68,35 @@ pipeline {
                     powershell '''
                         $ErrorActionPreference = "Stop"
 
+                        $docker = "C:\\Users\\Rishabesh\\AppData\\Local\\Programs\\DockerDesktop\\resources\\bin\\docker.exe"
+
+                        if (!(Test-Path $docker)) {
+                            throw "Docker executable not found: $docker"
+                        }
+
                         $version = $env:VERSION
                         $image = "$($env:DOCKER_USER)/telemedicine-devops:$version"
 
                         $env:DOCKER_TOKEN |
-                            docker login --username $env:DOCKER_USER --password-stdin
+                            & $docker login --username $env:DOCKER_USER --password-stdin
 
                         if ($LASTEXITCODE -ne 0) {
                             throw "Docker Hub login failed"
                         }
 
                         try {
-                            docker build -t $image ".\\$version"
+                            & $docker build -t $image ".\\$version"
                             if ($LASTEXITCODE -ne 0) {
                                 throw "Docker build failed for $version"
                             }
 
-                            docker push $image
+                            & $docker push $image
                             if ($LASTEXITCODE -ne 0) {
                                 throw "Docker push failed for $version"
                             }
                         }
                         finally {
-                            docker logout
+                            & $docker logout
                         }
                     '''
                 }
@@ -104,7 +106,7 @@ pipeline {
 
     post {
         success {
-            echo 'SUCCESS: Selected version tested, built, and pushed to Docker Hub.'
+            echo 'SUCCESS: Tests passed and the selected image was pushed to Docker Hub.'
         }
 
         failure {
