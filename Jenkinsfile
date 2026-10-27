@@ -20,16 +20,35 @@ pipeline {
             steps {
                 powershell '''
                     $ErrorActionPreference = "Stop"
-                    $version = $env:VERSION
 
+                    $python = "C:\\Users\\Rishabesh\\AppData\\Local\\Python\\bin\\python.exe"
+
+                    if (!(Test-Path $python)) {
+                        throw "Python executable not found: $python"
+                    }
+
+                    $version = $env:VERSION
                     Push-Location $version
+
                     try {
-                        python -m pip install -r requirements.txt
+                        & $python -m venv .venv
+                        if ($LASTEXITCODE -ne 0) {
+                            throw "Virtual environment creation failed"
+                        }
+
+                        $venvPython = Join-Path (Get-Location) ".venv\\Scripts\\python.exe"
+
+                        & $venvPython -m pip install --upgrade pip
+                        if ($LASTEXITCODE -ne 0) {
+                            throw "pip upgrade failed"
+                        }
+
+                        & $venvPython -m pip install -r requirements.txt
                         if ($LASTEXITCODE -ne 0) {
                             throw "Dependency installation failed"
                         }
 
-                        python -m pytest -v
+                        & $venvPython -m pytest -v
                         if ($LASTEXITCODE -ne 0) {
                             throw "Tests failed"
                         }
@@ -53,6 +72,9 @@ pipeline {
                     powershell '''
                         $ErrorActionPreference = "Stop"
 
+                        $version = $env:VERSION
+                        $image = "$($env:DOCKER_USER)/telemedicine-devops:$version"
+
                         $env:DOCKER_TOKEN |
                             docker login --username $env:DOCKER_USER --password-stdin
 
@@ -60,20 +82,20 @@ pipeline {
                             throw "Docker Hub login failed"
                         }
 
-                        $version = $env:VERSION
-                        $image = "$($env:DOCKER_USER)/telemedicine-devops:$version"
+                        try {
+                            docker build -t $image ".\\$version"
+                            if ($LASTEXITCODE -ne 0) {
+                                throw "Docker build failed for $version"
+                            }
 
-                        docker build -t $image ".\\$version"
-                        if ($LASTEXITCODE -ne 0) {
-                            throw "Docker build failed"
+                            docker push $image
+                            if ($LASTEXITCODE -ne 0) {
+                                throw "Docker push failed for $version"
+                            }
                         }
-
-                        docker push $image
-                        if ($LASTEXITCODE -ne 0) {
-                            throw "Docker push failed"
+                        finally {
+                            docker logout
                         }
-
-                        docker logout
                     '''
                 }
             }
@@ -82,10 +104,11 @@ pipeline {
 
     post {
         success {
-            echo 'Selected version tested, built, and pushed successfully.'
+            echo 'SUCCESS: Selected version tested, built, and pushed to Docker Hub.'
         }
+
         failure {
-            echo 'Pipeline failed. Inspect Console Output for the error.'
+            echo 'FAILED: Check Console Output for the first error.'
         }
     }
 }
