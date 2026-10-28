@@ -10,7 +10,7 @@ pipeline {
         choice(
             name: 'VERSION',
             choices: ['v1', 'v2', 'v3'],
-            description: 'Select which Telemedicine version to build'
+            description: 'Select Telemedicine version'
         )
     }
 
@@ -60,7 +60,7 @@ pipeline {
             }
         }
 
-        stage('Build and Push Image') {
+        stage('Test Docker Hub Authentication') {
             steps {
                 withCredentials([
                     usernamePassword(
@@ -78,55 +78,35 @@ pipeline {
                             throw "Docker executable not found: $docker"
                         }
 
-                        $version = $env:VERSION
-                        $image = "$($env:DOCKER_USER)/telemedicine-devops:$version"
-
-                        Write-Host "Selected version: $version"
                         Write-Host "Docker username: $env:DOCKER_USER"
-                        Write-Host "Token populated: $(-not [string]::IsNullOrWhiteSpace($env:DOCKER_TOKEN))"
-
-                        if ([string]::IsNullOrWhiteSpace($env:DOCKER_USER)) {
-                            throw "Docker Hub username is empty"
-                        }
 
                         if ([string]::IsNullOrWhiteSpace($env:DOCKER_TOKEN)) {
                             throw "Docker Hub token is empty"
                         }
 
-                        # Authenticate with Docker Hub without displaying the token.
+                        Write-Host "Token is populated: True"
+                        Write-Host "Testing Docker Hub authentication..."
+
                         $loginOutput = @(
                             $env:DOCKER_TOKEN |
                                 & $docker login `
                                     --username $env:DOCKER_USER `
                                     --password-stdin 2>&1
                         )
+
                         $loginExitCode = $LASTEXITCODE
 
                         if ($loginExitCode -ne 0) {
                             $loginOutput | ForEach-Object {
                                 Write-Host $_
                             }
-                            throw "Docker Hub login failed. Verify the Jenkins credential."
+
+                            throw "Docker Hub authentication failed."
                         }
 
-                        Write-Host "Docker Hub login succeeded."
+                        Write-Host "Docker Hub authentication succeeded."
 
-                        try {
-                            & $docker build -t $image ".\\$version"
-                            if ($LASTEXITCODE -ne 0) {
-                                throw "Docker build failed for $version"
-                            }
-
-                            & $docker push $image
-                            if ($LASTEXITCODE -ne 0) {
-                                throw "Docker push failed for $version"
-                            }
-
-                            Write-Host "Successfully pushed image: $image"
-                        }
-                        finally {
-                            & $docker logout
-                        }
+                        & $docker logout
                     '''
                 }
             }
@@ -135,7 +115,7 @@ pipeline {
 
     post {
         success {
-            echo 'SUCCESS: Tests passed and the selected Docker image was pushed to Docker Hub.'
+            echo 'SUCCESS: Tests passed and Docker Hub authentication succeeded.'
         }
 
         failure {
@@ -143,7 +123,7 @@ pipeline {
         }
 
         always {
-            echo 'Telemedicine CI/CD pipeline finished.'
+            echo 'Authentication diagnostic pipeline finished.'
         }
     }
 }
