@@ -25,7 +25,6 @@ pipeline {
             steps {
                 powershell '''
                     $ErrorActionPreference = "Stop"
-
                     $python = "C:\\Users\\Rishabesh\\AppData\\Local\\Python\\bin\\python.exe"
 
                     if (!(Test-Path $python)) {
@@ -60,7 +59,7 @@ pipeline {
             }
         }
 
-        stage('Test Docker Hub Authentication') {
+        stage('Build and Push Image') {
             steps {
                 withCredentials([
                     usernamePassword(
@@ -78,9 +77,8 @@ pipeline {
                             throw "Docker executable not found: $docker"
                         }
 
-                        if ([string]::IsNullOrWhiteSpace($env:DOCKER_USER)) {
-                            throw "Docker Hub username is empty"
-                        }
+                        $version = $env:VERSION
+                        $image = "$($env:DOCKER_USER)/telemedicine-devops:$version"
 
                         if ([string]::IsNullOrWhiteSpace($env:DOCKER_TOKEN)) {
                             throw "Docker Hub token is empty"
@@ -89,49 +87,47 @@ pipeline {
                         $tokenFile = Join-Path $env:TEMP (
                             "docker-token-" + [guid]::NewGuid().ToString() + ".txt"
                         )
-
                         $loginFile = Join-Path $env:TEMP (
                             "docker-login-" + [guid]::NewGuid().ToString() + ".cmd"
                         )
 
                         try {
                             $utf8 = New-Object System.Text.UTF8Encoding($false)
-
                             [System.IO.File]::WriteAllText(
-                                $tokenFile,
-                                $env:DOCKER_TOKEN,
-                                $utf8
+                                $tokenFile, $env:DOCKER_TOKEN, $utf8
                             )
 
-                            $dockerEscaped = $docker.Replace('"', '""')
-                            $tokenEscaped = $tokenFile.Replace('"', '""')
-
-                            $command = '"' + $dockerEscaped +
+                            $command = '"' + $docker +
                                 '" login --username "' + $env:DOCKER_USER +
-                                '" --password-stdin < "' + $tokenEscaped + '"'
+                                '" --password-stdin < "' + $tokenFile + '"'
 
                             [System.IO.File]::WriteAllText(
-                                $loginFile,
-                                $command,
-                                $utf8
+                                $loginFile, $command, $utf8
                             )
-
-                            Write-Host "Testing Docker Hub login for $env:DOCKER_USER"
 
                             & $env:ComSpec /d /c $loginFile
-                            $loginExitCode = $LASTEXITCODE
-
-                            if ($loginExitCode -ne 0) {
-                                throw "Docker Hub authentication failed."
+                            if ($LASTEXITCODE -ne 0) {
+                                throw "Docker Hub login failed"
                             }
 
-                            Write-Host "Docker Hub authentication succeeded."
+                            Write-Host "Docker Hub login succeeded."
 
-                            & $docker logout
+                            & $docker build -t $image ".\\$version"
+                            if ($LASTEXITCODE -ne 0) {
+                                throw "Docker build failed for $version"
+                            }
+
+                            & $docker push $image
+                            if ($LASTEXITCODE -ne 0) {
+                                throw "Docker push failed for $version"
+                            }
+
+                            Write-Host "Successfully pushed: $image"
                         }
                         finally {
                             Remove-Item $tokenFile -Force -ErrorAction SilentlyContinue
                             Remove-Item $loginFile -Force -ErrorAction SilentlyContinue
+                            & $docker logout
                         }
                     '''
                 }
@@ -141,15 +137,10 @@ pipeline {
 
     post {
         success {
-            echo 'SUCCESS: Tests passed and Docker Hub authentication succeeded.'
+            echo 'SUCCESS: Tests passed and Docker image was pushed.'
         }
-
         failure {
             echo 'FAILED: Check Console Output for the first error.'
-        }
-
-        always {
-            echo 'Telemedicine CI/CD diagnostic pipeline finished.'
         }
     }
 }
