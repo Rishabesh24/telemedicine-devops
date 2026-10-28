@@ -68,6 +68,9 @@ pipeline {
                     powershell '''
                         $ErrorActionPreference = "Stop"
 
+                        Write-Host "Docker username: $env:DOCKER_USER"
+                        Write-Host "Token populated: $(-not [string]::IsNullOrWhiteSpace($env:DOCKER_TOKEN))"
+
                         $docker = "C:\\Users\\Rishabesh\\AppData\\Local\\Programs\\DockerDesktop\\resources\\bin\\docker.exe"
 
                         if (!(Test-Path $docker)) {
