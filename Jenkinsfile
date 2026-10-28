@@ -78,35 +78,61 @@ pipeline {
                             throw "Docker executable not found: $docker"
                         }
 
-                        Write-Host "Docker username: $env:DOCKER_USER"
+                        if ([string]::IsNullOrWhiteSpace($env:DOCKER_USER)) {
+                            throw "Docker Hub username is empty"
+                        }
 
                         if ([string]::IsNullOrWhiteSpace($env:DOCKER_TOKEN)) {
                             throw "Docker Hub token is empty"
                         }
 
-                        Write-Host "Token is populated: True"
-                        Write-Host "Testing Docker Hub authentication..."
-
-                        $loginOutput = @(
-                            $env:DOCKER_TOKEN |
-                                & $docker login `
-                                    --username $env:DOCKER_USER `
-                                    --password-stdin 2>&1
+                        $tokenFile = Join-Path $env:TEMP (
+                            "docker-token-" + [guid]::NewGuid().ToString() + ".txt"
                         )
 
-                        $loginExitCode = $LASTEXITCODE
+                        $loginFile = Join-Path $env:TEMP (
+                            "docker-login-" + [guid]::NewGuid().ToString() + ".cmd"
+                        )
 
-                        if ($loginExitCode -ne 0) {
-                            $loginOutput | ForEach-Object {
-                                Write-Host $_
+                        try {
+                            $utf8 = New-Object System.Text.UTF8Encoding($false)
+
+                            [System.IO.File]::WriteAllText(
+                                $tokenFile,
+                                $env:DOCKER_TOKEN,
+                                $utf8
+                            )
+
+                            $dockerEscaped = $docker.Replace('"', '""')
+                            $tokenEscaped = $tokenFile.Replace('"', '""')
+
+                            $command = '"' + $dockerEscaped +
+                                '" login --username "' + $env:DOCKER_USER +
+                                '" --password-stdin < "' + $tokenEscaped + '"'
+
+                            [System.IO.File]::WriteAllText(
+                                $loginFile,
+                                $command,
+                                $utf8
+                            )
+
+                            Write-Host "Testing Docker Hub login for $env:DOCKER_USER"
+
+                            & $env:ComSpec /d /c $loginFile
+                            $loginExitCode = $LASTEXITCODE
+
+                            if ($loginExitCode -ne 0) {
+                                throw "Docker Hub authentication failed."
                             }
 
-                            throw "Docker Hub authentication failed."
+                            Write-Host "Docker Hub authentication succeeded."
+
+                            & $docker logout
                         }
-
-                        Write-Host "Docker Hub authentication succeeded."
-
-                        & $docker logout
+                        finally {
+                            Remove-Item $tokenFile -Force -ErrorAction SilentlyContinue
+                            Remove-Item $loginFile -Force -ErrorAction SilentlyContinue
+                        }
                     '''
                 }
             }
@@ -123,7 +149,7 @@ pipeline {
         }
 
         always {
-            echo 'Authentication diagnostic pipeline finished.'
+            echo 'Telemedicine CI/CD diagnostic pipeline finished.'
         }
     }
 }
